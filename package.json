@@ -1,0 +1,25 @@
+{
+  "name": "hostel-management-system",
+  "version": "1.0.0",
+  "description": "A modern, classroom-ready Hostel Assistance & Management System built with React and JavaScript",
+  "main": "index.html",
+  "scripts": {
+    "start": "python -m http.server 3000",
+    "serve": "python -m http.server 3000",
+    "build": "node build.js"
+  },
+  "keywords": [
+    "react",
+    "hostel-management",
+    "javascript-framework",
+    "student-portal",
+    "complaint-management",
+    "classroom-project"
+  ],
+  "author": "Student Project",
+  "license": "MIT",
+  "dependencies": {
+    "react": "^18.2.0",
+    "react-dom": "^18.2.0"
+  }
+}

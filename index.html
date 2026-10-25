@@ -1,0 +1,42 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>HostelCare - Student Residence & Assistance Management Portal</title>
+  <meta name="description" content="A simple, modern Hostel Management System built with React for student room maintenance, food/mess concerns, water facilities, and AC issues." />
+
+  <!-- Google Fonts: Plus Jakarta Sans for premium modern aesthetic -->
+  <link rel="preconnect" href="https://fonts.googleapis.com" />
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+  <link href="https://fonts.googleapis.com/css2?family=Plus+Jakarta+Sans:wght@400;500;600;700;800&display=swap" rel="stylesheet" />
+
+  <!-- Core Design System CSS -->
+  <link rel="stylesheet" href="style.css" />
+
+  <!-- Local Offline-Ready React 18, ReactDOM 18 & Babel Standalone (Works 100% offline in classrooms!) -->
+  <script src="lib/react.production.min.js"></script>
+  <script src="lib/react-dom.production.min.js"></script>
+  <script src="lib/babel.min.js"></script>
+</head>
+<body>
+  <!-- Root Container for React App -->
+  <div id="root">
+    <!-- Initial Loading State -->
+    <div style="min-height: 100vh; display: flex; flex-direction: column; align-items: center; justify-content: center; font-family: 'Plus Jakarta Sans', sans-serif; color: #4338ca;">
+      <div style="font-size: 2.5rem; margin-bottom: 0.5rem; animation: pulse 1.5s infinite;">🏨</div>
+      <h2 style="font-size: 1.25rem; font-weight: 700;">Loading HostelCare Portal...</h2>
+      <p style="color: #64748b; font-size: 0.9rem; margin-top: 0.25rem;">Preparing student assistance dashboard</p>
+    </div>
+  </div>
+
+  <noscript>
+    <div style="padding: 2rem; text-align: center; color: red;">
+      JavaScript is required to run the HostelCare Student Portal. Please enable JavaScript in your browser settings.
+    </div>
+  </noscript>
+
+  <!-- React 18 Application Script (Precompiled for ultra-fast, zero-delay rendering) -->
+  <script src="app.compiled.js"></script>
+</body>
+</html>
