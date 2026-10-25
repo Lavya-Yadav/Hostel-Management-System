@@ -1590,5 +1590,29 @@ function ClassroomGuideModal({ onClose }) {
 }
 
 // Mount React application to DOM
-const root = ReactDOM.createRoot(document.getElementById("root"));
-root.render(<App />);
+function mountHostelApp() {
+  const rootElement = document.getElementById("root");
+  if (!rootElement) {
+    console.error("Fatal: #root element not found");
+    return;
+  }
+  try {
+    const root = ReactDOM.createRoot(rootElement);
+    root.render(<App />);
+    console.log("✅ HostelCare React application mounted successfully.");
+  } catch (err) {
+    console.error("React render error:", err);
+    rootElement.innerHTML = `
+      <div style="padding:2rem;max-width:600px;margin:3rem auto;font-family:sans-serif;background:#fff1f2;border:1px solid #fecdd3;border-radius:8px;color:#9f1239;">
+        <h3 style="margin-top:0;">⚠️ Mounting Error</h3>
+        <p>${err.message}</p>
+        <button onclick="location.reload()" style="background:#e11d48;color:#fff;border:none;padding:8px 16px;border-radius:6px;cursor:pointer;">Reload</button>
+      </div>`;
+  }
+}
+
+if (document.readyState === "loading") {
+  document.addEventListener("DOMContentLoaded", mountHostelApp);
+} else {
+  mountHostelApp();
+}
