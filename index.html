@@ -43,15 +43,15 @@
       if (rootEl && rootEl.innerHTML.includes('Loading HostelCare Portal')) {
         rootEl.innerHTML = '<div style="padding: 2rem; max-width: 600px; margin: 3rem auto; font-family: sans-serif; background: #fff1f2; border: 1px solid #fecdd3; border-radius: 8px; color: #9f1239;">' +
           '<h3 style="margin-top:0;">⚠️ UI Loading Error</h3>' +
-          '<p>' + (e.message || 'Unknown error occurred while initializing React') + '</p>' +
+          '<p>' + (e.message || (e.target && e.target.src ? 'Failed to load script: ' + e.target.src : 'Script loading error')) + '</p>' +
           '<button onclick="location.reload()" style="background:#e11d48; color:#fff; border:none; padding:8px 16px; border-radius:6px; cursor:pointer;">Reload Portal</button>' +
           '</div>';
       }
-    });
+    }, true);
   </script>
 
-  <!-- React 18 Application Script (Precompiled for ultra-fast, zero-delay rendering) -->
-  <script src="app.compiled.js"></script>
+  <!-- React 18 Application Script with cache busting -->
+  <script src="app.compiled.js?v=2" onerror="document.getElementById('root').innerHTML='<div style=\'padding:2rem;text-align:center;color:#b91c1c;font-family:sans-serif;\'><h3>Failed to load app.compiled.js</h3><p>Please check your browser connection or cache.</p></div>'"></script>
 </body>
 </html>
 
