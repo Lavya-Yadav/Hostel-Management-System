@@ -269,24 +269,31 @@ const CATEGORIES = {
 // MAIN APPLICATION COMPONENT
 // ----------------------------------------------------------
 function App() {
-  // LocalStorage-backed state for easy presentation persistence
-  const [users, setUsers] = useState(() => {
-    const saved = localStorage.getItem("hostel_users");
-    return saved ? JSON.parse(saved) : INITIAL_USERS;
-  });
   const [currentUser, setCurrentUser] = useState(() => {
     const saved = localStorage.getItem("hostel_currentUser");
-    return saved ? JSON.parse(saved) : INITIAL_USERS[0]; // Default to student for quick testing
+    return saved ? JSON.parse(saved) : INITIAL_USERS[0]; // Default to demo student
   });
-  const [tickets, setTickets] = useState(() => {
-    const saved = localStorage.getItem("hostel_tickets");
-    return saved ? JSON.parse(saved) : INITIAL_TICKETS;
+  const [tickets, setTickets] = useState(INITIAL_TICKETS);
+  const [dbStatus, setDbStatus] = useState({
+    online: false,
+    database: "checking",
+    host: ""
   });
+  const [loadingTickets, setLoadingTickets] = useState(false);
   const [authView, setAuthView] = useState("login"); // 'login' or 'signup'
   const [activeCategoryFilter, setActiveCategoryFilter] = useState("all");
   const [activeStatusFilter, setActiveStatusFilter] = useState("all");
   const [searchQuery, setSearchQuery] = useState("");
-  const [activeRoleView, setActiveRoleView] = useState("student"); // 'student' or 'warden' toggle
+  const [activeRoleView, setActiveRoleView] = useState(() => {
+    const saved = localStorage.getItem("hostel_currentUser");
+    if (saved) {
+      try {
+        const u = JSON.parse(saved);
+        return u.role === "warden" ? "warden" : "student";
+      } catch (e) {}
+    }
+    return "student";
+  });
 
   // Modals state
   const [isNewRequestOpen, setIsNewRequestOpen] = useState(false);
@@ -295,20 +302,57 @@ function App() {
   const [isGuideOpen, setIsGuideOpen] = useState(false);
   const [toastMessage, setToastMessage] = useState(null);
 
-  // Sync state to LocalStorage
+  // Check Node.js and MongoDB backend health
+  const checkHealth = async () => {
+    try {
+      const res = await fetch("/api/health");
+      const data = await res.json();
+      setDbStatus({
+        online: data.status === "online",
+        database: data.database,
+        host: data.databaseHost
+      });
+    } catch (err) {
+      setDbStatus({
+        online: false,
+        database: "disconnected",
+        host: "offline"
+      });
+    }
+  };
   useEffect(() => {
-    localStorage.setItem("hostel_users", JSON.stringify(users));
-  }, [users]);
-  useEffect(() => {
-    localStorage.setItem("hostel_tickets", JSON.stringify(tickets));
-  }, [tickets]);
+    checkHealth();
+    const interval = setInterval(checkHealth, 15000);
+    return () => clearInterval(interval);
+  }, []);
+
+  // Fetch tickets from Node.js & MongoDB API
+  const fetchTickets = async () => {
+    setLoadingTickets(true);
+    try {
+      let url = `/api/tickets?role=${activeRoleView}`;
+      if (activeRoleView !== "warden" && currentUser?.email) {
+        url += `&studentEmail=${encodeURIComponent(currentUser.email)}`;
+      }
+      const res = await fetch(url);
+      const data = await res.json();
+      if (data.success && Array.isArray(data.tickets)) {
+        setTickets(data.tickets);
+      }
+    } catch (err) {
+      console.warn("API fetch error, keeping local state:", err);
+    } finally {
+      setLoadingTickets(false);
+    }
+  };
   useEffect(() => {
     if (currentUser) {
       localStorage.setItem("hostel_currentUser", JSON.stringify(currentUser));
+      fetchTickets();
     } else {
       localStorage.removeItem("hostel_currentUser");
     }
-  }, [currentUser]);
+  }, [currentUser, activeRoleView]);
 
   // Toast notification helper
   const showToast = msg => {
@@ -318,128 +362,166 @@ function App() {
     }, 3500);
   };
 
-  // Auth Handlers
-  const handleLogin = (email, password) => {
-    const foundUser = users.find(u => u.email.toLowerCase() === email.toLowerCase() && u.password === password);
-    if (foundUser) {
-      setCurrentUser(foundUser);
-      setActiveRoleView(foundUser.role === "warden" ? "warden" : "student");
-      showToast(`Welcome back, ${foundUser.name}!`);
-      return {
-        success: true
-      };
-    } else {
+  // Auth Handlers with Node.js / MongoDB
+  const handleLogin = async (email, password) => {
+    try {
+      const res = await fetch("/api/auth/login", {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json"
+        },
+        body: JSON.stringify({
+          email,
+          password
+        })
+      });
+      const data = await res.json();
+      if (data.success) {
+        setCurrentUser(data.user);
+        setActiveRoleView(data.user.role === "warden" ? "warden" : "student");
+        showToast(data.message || `Welcome back, ${data.user.name}!`);
+        return {
+          success: true
+        };
+      } else {
+        return {
+          success: false,
+          error: data.message || "Invalid email or password."
+        };
+      }
+    } catch (err) {
+      // Fallback to demo credentials if backend API is not responding
+      const foundUser = INITIAL_USERS.find(u => u.email.toLowerCase() === email.toLowerCase() && u.password === password);
+      if (foundUser) {
+        setCurrentUser(foundUser);
+        setActiveRoleView(foundUser.role === "warden" ? "warden" : "student");
+        showToast(`Welcome back, ${foundUser.name}! (Demo Fallback)`);
+        return {
+          success: true
+        };
+      }
       return {
         success: false,
-        error: "Invalid email or password. Please try again."
+        error: "Connection error: " + err.message
       };
     }
   };
-  const handleSignup = newUser => {
-    const emailExists = users.some(u => u.email.toLowerCase() === newUser.email.toLowerCase());
-    if (emailExists) {
+  const handleSignup = async newUser => {
+    try {
+      const res = await fetch("/api/auth/signup", {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json"
+        },
+        body: JSON.stringify(newUser)
+      });
+      const data = await res.json();
+      if (data.success) {
+        setCurrentUser(data.user);
+        setActiveRoleView("student");
+        showToast(data.message || "Account created successfully!");
+        return {
+          success: true
+        };
+      } else {
+        return {
+          success: false,
+          error: data.message || "Failed to create account."
+        };
+      }
+    } catch (err) {
       return {
         success: false,
-        error: "An account with this email already exists."
+        error: "Server connection failed: " + err.message
       };
     }
-    const createdUser = {
-      ...newUser,
-      id: "user-" + Date.now(),
-      role: "student"
-    };
-    setUsers([...users, createdUser]);
-    setCurrentUser(createdUser);
-    setActiveRoleView("student");
-    showToast("Account created successfully! Logged in as " + createdUser.name);
-    return {
-      success: true
-    };
   };
   const handleLogout = () => {
     setCurrentUser(null);
+    localStorage.removeItem("hostel_currentUser");
     setAuthView("login");
     showToast("Logged out successfully.");
   };
 
   // Ticket Handlers
-  const handleCreateTicket = ticketData => {
-    const newId = "HST-" + (205 + tickets.length);
-    const now = new Date();
-    const formattedDate = now.toLocaleDateString("en-US", {
-      month: "short",
-      day: "numeric",
-      hour: "2-digit",
-      minute: "2-digit"
-    });
-    const newTicket = {
-      id: newId,
-      title: ticketData.title,
-      category: ticketData.category,
-      priority: ticketData.priority,
-      status: "pending",
-      studentName: currentUser.name,
-      studentEmail: currentUser.email,
-      roomNo: ticketData.roomNo || currentUser.roomNo,
-      block: currentUser.block,
-      preferredTime: ticketData.preferredTime,
-      subIssue: ticketData.subIssue,
-      description: ticketData.description,
-      createdAt: now.toISOString().replace("T", " ").substring(0, 16),
-      supervisorNote: "Ticket logged into hostel assistance portal. Supervisor will review shortly.",
-      timeline: [{
-        step: "Request Submitted",
-        time: formattedDate,
-        done: true
-      }, {
-        step: "Supervisor Review",
-        time: "Pending",
-        done: false
-      }, {
-        step: "Staff Assignment",
-        time: "Pending",
-        done: false
-      }, {
-        step: "Resolution",
-        time: "Pending",
-        done: false
-      }]
-    };
-    setTickets([newTicket, ...tickets]);
-    setIsNewRequestOpen(false);
-    showToast(`Request #${newId} submitted successfully!`);
-  };
-  const handleUpdateTicketStatus = (ticketId, newStatus, note = "") => {
-    setTickets(prev => prev.map(t => {
-      if (t.id === ticketId) {
-        const updatedTimeline = t.timeline.map((step, idx) => {
-          if (newStatus === "progress" && idx <= 2) return {
-            ...step,
-            done: true
-          };
-          if (newStatus === "resolved") return {
-            ...step,
-            done: true
-          };
-          return step;
-        });
-        return {
-          ...t,
-          status: newStatus,
-          supervisorNote: note || (newStatus === "resolved" ? "Issue inspected and verified fixed by warden." : t.supervisorNote),
-          timeline: updatedTimeline
-        };
+  const handleCreateTicket = async ticketData => {
+    try {
+      const payload = {
+        ...ticketData,
+        studentName: currentUser.name,
+        studentEmail: currentUser.email,
+        roomNo: ticketData.roomNo || currentUser.roomNo,
+        block: currentUser.block
+      };
+      const res = await fetch("/api/tickets", {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json"
+        },
+        body: JSON.stringify(payload)
+      });
+      const data = await res.json();
+      if (data.success && data.ticket) {
+        setTickets(prev => [data.ticket, ...prev]);
+        setIsNewRequestOpen(false);
+        showToast(`Request #${data.ticket.id} submitted successfully!`);
+      } else {
+        showToast("Error saving ticket: " + (data.message || "Unknown error"));
       }
-      return t;
-    }));
-    if (selectedTicket && selectedTicket.id === ticketId) {
-      setSelectedTicket(prev => ({
-        ...prev,
-        status: newStatus,
-        supervisorNote: note || (newStatus === "resolved" ? "Issue inspected and verified fixed by warden." : prev.supervisorNote)
-      }));
+    } catch (err) {
+      // Local fallback
+      const newId = "HST-" + (205 + tickets.length);
+      const newTicket = {
+        id: newId,
+        ...ticketData,
+        status: "pending",
+        studentName: currentUser.name,
+        studentEmail: currentUser.email,
+        roomNo: ticketData.roomNo || currentUser.roomNo,
+        block: currentUser.block,
+        supervisorNote: "Ticket logged.",
+        timeline: [{
+          step: "Request Submitted",
+          time: "Just now",
+          done: true
+        }]
+      };
+      setTickets([newTicket, ...tickets]);
+      setIsNewRequestOpen(false);
+      showToast(`Request #${newId} submitted successfully!`);
     }
-    showToast(`Ticket #${ticketId} status updated to ${newStatus.toUpperCase()}`);
+  };
+  const handleUpdateTicketStatus = async (ticketId, newStatus, note = "") => {
+    try {
+      const res = await fetch(`/api/tickets/${ticketId}`, {
+        method: "PATCH",
+        headers: {
+          "Content-Type": "application/json"
+        },
+        body: JSON.stringify({
+          status: newStatus,
+          supervisorNote: note
+        })
+      });
+      const data = await res.json();
+      if (data.success && data.ticket) {
+        setTickets(prev => prev.map(t => t.id === ticketId ? data.ticket : t));
+        if (selectedTicket && selectedTicket.id === ticketId) {
+          setSelectedTicket(data.ticket);
+        }
+        showToast(`Ticket #${ticketId} status updated to ${newStatus === "progress" ? "In Progress" : newStatus.toUpperCase()}`);
+      } else {
+        showToast("Update error: " + (data.message || "Failed"));
+      }
+    } catch (err) {
+      // Local state fallback
+      setTickets(prev => prev.map(t => t.id === ticketId ? {
+        ...t,
+        status: newStatus,
+        supervisorNote: note || t.supervisorNote
+      } : t));
+      showToast(`Ticket #${ticketId} status updated!`);
+    }
   };
 
   // Filtered Tickets
@@ -473,6 +555,7 @@ function App() {
   return /*#__PURE__*/React.createElement("div", null, /*#__PURE__*/React.createElement(Navbar, {
     currentUser: currentUser,
     activeRoleView: activeRoleView,
+    dbStatus: dbStatus,
     onRoleChange: role => setActiveRoleView(role),
     onLogout: handleLogout,
     onOpenGuide: () => setIsGuideOpen(true)
@@ -523,6 +606,7 @@ function App() {
 function Navbar({
   currentUser,
   activeRoleView,
+  dbStatus,
   onRoleChange,
   onLogout,
   onOpenGuide
@@ -537,7 +621,12 @@ function Navbar({
     className: "brand-icon"
   }, "\uD83C\uDFE8"), /*#__PURE__*/React.createElement("span", null, "HostelCare"), /*#__PURE__*/React.createElement("span", {
     className: "brand-badge"
-  }, "Student Portal")), /*#__PURE__*/React.createElement("div", {
+  }, "Student Portal"), dbStatus && /*#__PURE__*/React.createElement("div", {
+    className: `status-indicator-pill ${dbStatus.database === "connected" ? "online" : "offline"}`,
+    title: dbStatus.database === "connected" ? "Database connected and operational" : "Service Offline"
+  }, /*#__PURE__*/React.createElement("span", {
+    className: "status-dot-pulse"
+  }), /*#__PURE__*/React.createElement("span", null, dbStatus.database === "connected" ? "Active" : "Offline"))), /*#__PURE__*/React.createElement("div", {
     className: "nav-actions"
   }, /*#__PURE__*/React.createElement("button", {
     className: "btn btn-guide",
@@ -577,14 +666,17 @@ function LoginPage({
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
   const [error, setError] = useState("");
-  const handleSubmit = e => {
+  const [loading, setLoading] = useState(false);
+  const handleSubmit = async e => {
     e.preventDefault();
     setError("");
     if (!email || !password) {
       setError("Please fill in both email and password.");
       return;
     }
-    const res = onLogin(email, password);
+    setLoading(true);
+    const res = await onLogin(email, password);
+    setLoading(false);
     if (!res.success) {
       setError(res.error);
     }
@@ -656,8 +748,9 @@ function LoginPage({
     style: {
       width: "100%",
       marginTop: "0.5rem"
-    }
-  }, "Sign In to Hostel Portal")), /*#__PURE__*/React.createElement("div", {
+    },
+    disabled: loading
+  }, loading ? "Signing In..." : "Sign In to Hostel Portal")), /*#__PURE__*/React.createElement("div", {
     className: "auth-footer"
   }, "Don't have an account yet?", /*#__PURE__*/React.createElement("span", {
     className: "auth-link",
@@ -683,13 +776,14 @@ function SignupPage({
     confirmPassword: ""
   });
   const [error, setError] = useState("");
+  const [loading, setLoading] = useState(false);
   const handleChange = e => {
     setFormData({
       ...formData,
       [e.target.name]: e.target.value
     });
   };
-  const handleSubmit = e => {
+  const handleSubmit = async e => {
     e.preventDefault();
     setError("");
     if (!formData.name || !formData.email || !formData.rollNo || !formData.roomNo || !formData.password) {
@@ -704,7 +798,9 @@ function SignupPage({
       setError("Passwords do not match.");
       return;
     }
-    const res = onSignup(formData);
+    setLoading(true);
+    const res = await onSignup(formData);
+    setLoading(false);
     if (!res.success) {
       setError(res.error);
     }
@@ -842,8 +938,9 @@ function SignupPage({
     style: {
       width: "100%",
       marginTop: "0.5rem"
-    }
-  }, "Create Student Account")), /*#__PURE__*/React.createElement("div", {
+    },
+    disabled: loading
+  }, loading ? "Creating Account..." : "Create Student Account")), /*#__PURE__*/React.createElement("div", {
     className: "auth-footer"
   }, "Already registered?", /*#__PURE__*/React.createElement("span", {
     className: "auth-link",
@@ -1051,6 +1148,7 @@ function NewRequestModal({
   const [title, setTitle] = useState("");
   const [description, setDescription] = useState("");
   const [error, setError] = useState("");
+  const [submitting, setSubmitting] = useState(false);
 
   // Update subIssue when category changes
   const handleCategoryChange = newCat => {
@@ -1060,14 +1158,15 @@ function NewRequestModal({
       setSubIssue(issues[0]);
     }
   };
-  const handleSubmit = e => {
+  const handleSubmit = async e => {
     e.preventDefault();
     if (!description.trim()) {
       setError("Please provide a brief description of the issue.");
       return;
     }
+    setSubmitting(true);
     const finalTitle = title.trim() || `${subIssue} in Room ${roomNo || currentUser.roomNo}`;
-    onSubmit({
+    await onSubmit({
       title: finalTitle,
       category,
       subIssue,
@@ -1076,6 +1175,7 @@ function NewRequestModal({
       preferredTime,
       description
     });
+    setSubmitting(false);
   };
   return /*#__PURE__*/React.createElement("div", {
     className: "modal-overlay",
@@ -1193,11 +1293,13 @@ function NewRequestModal({
   }, /*#__PURE__*/React.createElement("button", {
     type: "button",
     className: "btn btn-secondary",
-    onClick: onClose
+    onClick: onClose,
+    disabled: submitting
   }, "Cancel"), /*#__PURE__*/React.createElement("button", {
     type: "submit",
-    className: "btn btn-primary"
-  }, "Submit Request")))));
+    className: "btn btn-primary",
+    disabled: submitting
+  }, submitting ? "Submitting Request..." : "Submit Request")))));
 }
 
 // ----------------------------------------------------------
@@ -1385,17 +1487,17 @@ function ClassroomGuideModal({
     className: "guide-section"
   }, /*#__PURE__*/React.createElement("h3", null, "1. Project Synopsis (What to say in 30 seconds)"), /*#__PURE__*/React.createElement("p", null, /*#__PURE__*/React.createElement("em", null, "\"Respected Teacher and friends, our project is a ", /*#__PURE__*/React.createElement("strong", null, "Hostel Assistance & Management System"), " built using the ", /*#__PURE__*/React.createElement("strong", null, "React JavaScript framework"), ". It provides students an intuitive portal to log in, register their room, and raise assistance requests for room maintenance, mess food quality, and facilities like water geyser/leakage and air conditioning. It also includes a warden administration view to monitor and resolve tickets with a full tracking timeline.\""))), /*#__PURE__*/React.createElement("div", {
     className: "guide-section"
-  }, /*#__PURE__*/React.createElement("h3", null, "2. Key React Framework Concepts Used"), /*#__PURE__*/React.createElement("ul", null, /*#__PURE__*/React.createElement("li", null, /*#__PURE__*/React.createElement("strong", null, "Components:"), " Modular, reusable pieces of UI (`Navbar`, `LoginPage`, `SignupPage`, `Dashboard`, `NewRequestModal`, `TicketDetailModal`)."), /*#__PURE__*/React.createElement("li", null, /*#__PURE__*/React.createElement("strong", null, "State Management (useState):"), " Manages user authentication, tickets list, category filters, search queries, and modal visibility dynamically."), /*#__PURE__*/React.createElement("li", null, /*#__PURE__*/React.createElement("strong", null, "Persistence (useEffect & localStorage):"), " Automatically saves all registered students and tickets in the browser's LocalStorage so data never vanishes on refresh."), /*#__PURE__*/React.createElement("li", null, /*#__PURE__*/React.createElement("strong", null, "Performance (useMemo):"), " Efficiently computes filtered tickets and dashboard metrics without unnecessary re-renders."), /*#__PURE__*/React.createElement("li", null, /*#__PURE__*/React.createElement("strong", null, "Props & One-Way Data Flow:"), " Data and actions are passed cleanly from the parent `App` down to child components."))), /*#__PURE__*/React.createElement("div", {
+  }, /*#__PURE__*/React.createElement("h3", null, "2. Key Architecture & Framework Concepts"), /*#__PURE__*/React.createElement("ul", null, /*#__PURE__*/React.createElement("li", null, /*#__PURE__*/React.createElement("strong", null, "Node.js & Express REST Backend:"), " Provides backend API endpoints (`/api/auth` and `/api/tickets`) for student registration, login verification, and complaint ticket lifecycle management."), /*#__PURE__*/React.createElement("li", null, /*#__PURE__*/React.createElement("strong", null, "MongoDB & Mongoose:"), " Provides robust NoSQL document storage for users and tickets with schemas, validation, and persistent history."), /*#__PURE__*/React.createElement("li", null, /*#__PURE__*/React.createElement("strong", null, "React 18 Component UI:"), " Modular components (`Navbar`, `LoginPage`, `SignupPage`, `Dashboard`, `NewRequestModal`, `TicketDetailModal`)."), /*#__PURE__*/React.createElement("li", null, /*#__PURE__*/React.createElement("strong", null, "State & Hooks (useState, useEffect, useMemo):"), " Handles reactive state, asynchronous API fetching, dynamic status tracking, and computed analytics."), /*#__PURE__*/React.createElement("li", null, /*#__PURE__*/React.createElement("strong", null, "Dual-Role Architecture:"), " Clear separation between Student view (submitting requests & tracking room tickets) and Warden administration (managing all hostel tickets & adding supervisor notes)."))), /*#__PURE__*/React.createElement("div", {
     className: "guide-section"
   }, /*#__PURE__*/React.createElement("h3", null, "3. Architecture Flow Diagram"), /*#__PURE__*/React.createElement("div", {
     className: "guide-code-box"
-  }, "App (State Root: currentUser, tickets, users, filters)", /*#__PURE__*/React.createElement("br", null), "\xA0\u251C\u2500\u2500 Navbar (Brand, Role Switcher, Presentation Guide, Logout)", /*#__PURE__*/React.createElement("br", null), "\xA0\u251C\u2500\u2500 LoginPage & SignupPage (Conditional Render if !currentUser)", /*#__PURE__*/React.createElement("br", null), "\xA0\u2514\u2500\u2500 Dashboard (Rendered when authenticated)", /*#__PURE__*/React.createElement("br", null), "\xA0\xA0\xA0\xA0\xA0\u251C\u2500\u2500 WelcomeBanner (Room & Block info)", /*#__PURE__*/React.createElement("br", null), "\xA0\xA0\xA0\xA0\xA0\u251C\u2500\u2500 StatsCards (Total, Pending, In-Progress, Resolved)", /*#__PURE__*/React.createElement("br", null), "\xA0\xA0\xA0\xA0\xA0\u251C\u2500\u2500 FacilityCards (Room, Food, Water, AC, Electrical, Wi-Fi)", /*#__PURE__*/React.createElement("br", null), "\xA0\xA0\xA0\xA0\xA0\u251C\u2500\u2500 FilterToolbar & SearchBar", /*#__PURE__*/React.createElement("br", null), "\xA0\xA0\xA0\xA0\xA0\u251C\u2500\u2500 TicketsList (TicketCard items with status pills)", /*#__PURE__*/React.createElement("br", null), "\xA0\xA0\xA0\xA0\xA0\u251C\u2500\u2500 NewRequestModal (Dynamic category-specific sub-issues)", /*#__PURE__*/React.createElement("br", null), "\xA0\xA0\xA0\xA0\xA0\u2514\u2500\u2500 TicketDetailModal (Timeline progression & Warden controls)")), /*#__PURE__*/React.createElement("div", {
+  }, "React 18 Frontend (Port 3000)", /*#__PURE__*/React.createElement("br", null), "\xA0\u251C\u2500\u2500 UI Layer (Navbar, Login/Signup, Dashboard, Ticket Modals)", /*#__PURE__*/React.createElement("br", null), "\xA0\u2514\u2500\u2500 REST API Client (fetch /api/auth, /api/tickets)", /*#__PURE__*/React.createElement("br", null), "\xA0\xA0\xA0\xA0\xA0\xA0\xA0\xA0\xA0\xA0\xA0\xA0\xA0\u25B2\xA0\u25BC (JSON HTTP Requests)", /*#__PURE__*/React.createElement("br", null), "Node.js + Express Backend Server (`server.js`)", /*#__PURE__*/React.createElement("br", null), "\xA0\u251C\u2500\u2500 Auth Routes (`/api/auth/login`, `/api/auth/signup`)", /*#__PURE__*/React.createElement("br", null), "\xA0\u251C\u2500\u2500 Ticket Routes (`/api/tickets`, status patch, category filter)", /*#__PURE__*/React.createElement("br", null), "\xA0\u2514\u2500\u2500 Mongoose ODM Layer (UserSchema, TicketSchema)", /*#__PURE__*/React.createElement("br", null), "\xA0\xA0\xA0\xA0\xA0\xA0\xA0\xA0\xA0\xA0\xA0\xA0\xA0\u25B2\xA0\u25BC (Mongoose Connection)", /*#__PURE__*/React.createElement("br", null), "MongoDB Database (`hostelcare` database, users & tickets collections)")), /*#__PURE__*/React.createElement("div", {
     className: "guide-section"
   }, /*#__PURE__*/React.createElement("h3", null, "4. Top 4 Expected Viva Questions & Answers"), /*#__PURE__*/React.createElement("div", {
     className: "qa-card"
-  }, /*#__PURE__*/React.createElement("strong", null, "Q1: Why did you choose React for this system?"), "React allows building dynamic Single Page Applications (SPAs) with component reusability and instantaneous UI updates using state hooks, eliminating full page reloads."), /*#__PURE__*/React.createElement("div", {
+  }, /*#__PURE__*/React.createElement("strong", null, "Q1: What is the tech stack of this application?"), "The project is a Full-Stack MERN-architecture application: ", /*#__PURE__*/React.createElement("strong", null, "React 18"), " for the reactive single-page frontend, ", /*#__PURE__*/React.createElement("strong", null, "Node.js"), " and ", /*#__PURE__*/React.createElement("strong", null, "Express"), " for the RESTful backend web server, and ", /*#__PURE__*/React.createElement("strong", null, "MongoDB"), " with ", /*#__PURE__*/React.createElement("strong", null, "Mongoose"), " for document database storage."), /*#__PURE__*/React.createElement("div", {
     className: "qa-card"
-  }, /*#__PURE__*/React.createElement("strong", null, "Q2: Where is the database or backend stored?"), "To keep the architecture simple and eliminate complex server dependencies for this classroom demonstration, we utilize the browser's native `localStorage` API, serializing state with `JSON.stringify` and restoring it with `JSON.parse`."), /*#__PURE__*/React.createElement("div", {
+  }, /*#__PURE__*/React.createElement("strong", null, "Q2: How and where is data stored?"), "All user accounts and hostel complaint tickets are saved permanently in a ", /*#__PURE__*/React.createElement("strong", null, "MongoDB"), " database. Mongoose models (`User` and `Ticket`) enforce data validation and timestamps. When a ticket is submitted or updated, React sends a REST request to the Node.js backend which writes directly to MongoDB."), /*#__PURE__*/React.createElement("div", {
     className: "qa-card"
   }, /*#__PURE__*/React.createElement("strong", null, "Q3: How do you handle different categories like Food, AC, and Water?"), "We defined a structured JavaScript configuration object `CATEGORIES`. Each category specifies unique icons, styling classes, and dynamic sub-issues (e.g., AC not cooling, Water tap leaking, Food hygiene) which dynamically populate the request form."), /*#__PURE__*/React.createElement("div", {
     className: "qa-card"

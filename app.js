@@ -255,27 +255,29 @@ const CATEGORIES = {
 // MAIN APPLICATION COMPONENT
 // ----------------------------------------------------------
 function App() {
-  // LocalStorage-backed state for easy presentation persistence
-  const [users, setUsers] = useState(() => {
-    const saved = localStorage.getItem("hostel_users");
-    return saved ? JSON.parse(saved) : INITIAL_USERS;
-  });
-
   const [currentUser, setCurrentUser] = useState(() => {
     const saved = localStorage.getItem("hostel_currentUser");
-    return saved ? JSON.parse(saved) : INITIAL_USERS[0]; // Default to student for quick testing
+    return saved ? JSON.parse(saved) : INITIAL_USERS[0]; // Default to demo student
   });
 
-  const [tickets, setTickets] = useState(() => {
-    const saved = localStorage.getItem("hostel_tickets");
-    return saved ? JSON.parse(saved) : INITIAL_TICKETS;
-  });
+  const [tickets, setTickets] = useState(INITIAL_TICKETS);
+  const [dbStatus, setDbStatus] = useState({ online: false, database: "checking", host: "" });
+  const [loadingTickets, setLoadingTickets] = useState(false);
 
   const [authView, setAuthView] = useState("login"); // 'login' or 'signup'
   const [activeCategoryFilter, setActiveCategoryFilter] = useState("all");
   const [activeStatusFilter, setActiveStatusFilter] = useState("all");
   const [searchQuery, setSearchQuery] = useState("");
-  const [activeRoleView, setActiveRoleView] = useState("student"); // 'student' or 'warden' toggle
+  const [activeRoleView, setActiveRoleView] = useState(() => {
+    const saved = localStorage.getItem("hostel_currentUser");
+    if (saved) {
+      try {
+        const u = JSON.parse(saved);
+        return u.role === "warden" ? "warden" : "student";
+      } catch (e) {}
+    }
+    return "student";
+  });
   
   // Modals state
   const [isNewRequestOpen, setIsNewRequestOpen] = useState(false);
@@ -284,22 +286,55 @@ function App() {
   const [isGuideOpen, setIsGuideOpen] = useState(false);
   const [toastMessage, setToastMessage] = useState(null);
 
-  // Sync state to LocalStorage
-  useEffect(() => {
-    localStorage.setItem("hostel_users", JSON.stringify(users));
-  }, [users]);
+  // Check Node.js and MongoDB backend health
+  const checkHealth = async () => {
+    try {
+      const res = await fetch("/api/health");
+      const data = await res.json();
+      setDbStatus({
+        online: data.status === "online",
+        database: data.database,
+        host: data.databaseHost
+      });
+    } catch (err) {
+      setDbStatus({ online: false, database: "disconnected", host: "offline" });
+    }
+  };
 
   useEffect(() => {
-    localStorage.setItem("hostel_tickets", JSON.stringify(tickets));
-  }, [tickets]);
+    checkHealth();
+    const interval = setInterval(checkHealth, 15000);
+    return () => clearInterval(interval);
+  }, []);
+
+  // Fetch tickets from Node.js & MongoDB API
+  const fetchTickets = async () => {
+    setLoadingTickets(true);
+    try {
+      let url = `/api/tickets?role=${activeRoleView}`;
+      if (activeRoleView !== "warden" && currentUser?.email) {
+        url += `&studentEmail=${encodeURIComponent(currentUser.email)}`;
+      }
+      const res = await fetch(url);
+      const data = await res.json();
+      if (data.success && Array.isArray(data.tickets)) {
+        setTickets(data.tickets);
+      }
+    } catch (err) {
+      console.warn("API fetch error, keeping local state:", err);
+    } finally {
+      setLoadingTickets(false);
+    }
+  };
 
   useEffect(() => {
     if (currentUser) {
       localStorage.setItem("hostel_currentUser", JSON.stringify(currentUser));
+      fetchTickets();
     } else {
       localStorage.removeItem("hostel_currentUser");
     }
-  }, [currentUser]);
+  }, [currentUser, activeRoleView]);
 
   // Toast notification helper
   const showToast = (msg) => {
@@ -309,118 +344,140 @@ function App() {
     }, 3500);
   };
 
-  // Auth Handlers
-  const handleLogin = (email, password) => {
-    const foundUser = users.find(
-      (u) => u.email.toLowerCase() === email.toLowerCase() && u.password === password
-    );
+  // Auth Handlers with Node.js / MongoDB
+  const handleLogin = async (email, password) => {
+    try {
+      const res = await fetch("/api/auth/login", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ email, password })
+      });
+      const data = await res.json();
 
-    if (foundUser) {
-      setCurrentUser(foundUser);
-      setActiveRoleView(foundUser.role === "warden" ? "warden" : "student");
-      showToast(`Welcome back, ${foundUser.name}!`);
-      return { success: true };
-    } else {
-      return { success: false, error: "Invalid email or password. Please try again." };
+      if (data.success) {
+        setCurrentUser(data.user);
+        setActiveRoleView(data.user.role === "warden" ? "warden" : "student");
+        showToast(data.message || `Welcome back, ${data.user.name}!`);
+        return { success: true };
+      } else {
+        return { success: false, error: data.message || "Invalid email or password." };
+      }
+    } catch (err) {
+      // Fallback to demo credentials if backend API is not responding
+      const foundUser = INITIAL_USERS.find(
+        (u) => u.email.toLowerCase() === email.toLowerCase() && u.password === password
+      );
+      if (foundUser) {
+        setCurrentUser(foundUser);
+        setActiveRoleView(foundUser.role === "warden" ? "warden" : "student");
+        showToast(`Welcome back, ${foundUser.name}! (Demo Fallback)`);
+        return { success: true };
+      }
+      return { success: false, error: "Connection error: " + err.message };
     }
   };
 
-  const handleSignup = (newUser) => {
-    const emailExists = users.some(
-      (u) => u.email.toLowerCase() === newUser.email.toLowerCase()
-    );
-    if (emailExists) {
-      return { success: false, error: "An account with this email already exists." };
+  const handleSignup = async (newUser) => {
+    try {
+      const res = await fetch("/api/auth/signup", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(newUser)
+      });
+      const data = await res.json();
+
+      if (data.success) {
+        setCurrentUser(data.user);
+        setActiveRoleView("student");
+        showToast(data.message || "Account created successfully!");
+        return { success: true };
+      } else {
+        return { success: false, error: data.message || "Failed to create account." };
+      }
+    } catch (err) {
+      return { success: false, error: "Server connection failed: " + err.message };
     }
-
-    const createdUser = {
-      ...newUser,
-      id: "user-" + Date.now(),
-      role: "student"
-    };
-
-    setUsers([...users, createdUser]);
-    setCurrentUser(createdUser);
-    setActiveRoleView("student");
-    showToast("Account created successfully! Logged in as " + createdUser.name);
-    return { success: true };
   };
 
   const handleLogout = () => {
     setCurrentUser(null);
+    localStorage.removeItem("hostel_currentUser");
     setAuthView("login");
     showToast("Logged out successfully.");
   };
 
   // Ticket Handlers
-  const handleCreateTicket = (ticketData) => {
-    const newId = "HST-" + (205 + tickets.length);
-    const now = new Date();
-    const formattedDate = now.toLocaleDateString("en-US", {
-      month: "short",
-      day: "numeric",
-      hour: "2-digit",
-      minute: "2-digit"
-    });
+  const handleCreateTicket = async (ticketData) => {
+    try {
+      const payload = {
+        ...ticketData,
+        studentName: currentUser.name,
+        studentEmail: currentUser.email,
+        roomNo: ticketData.roomNo || currentUser.roomNo,
+        block: currentUser.block
+      };
 
-    const newTicket = {
-      id: newId,
-      title: ticketData.title,
-      category: ticketData.category,
-      priority: ticketData.priority,
-      status: "pending",
-      studentName: currentUser.name,
-      studentEmail: currentUser.email,
-      roomNo: ticketData.roomNo || currentUser.roomNo,
-      block: currentUser.block,
-      preferredTime: ticketData.preferredTime,
-      subIssue: ticketData.subIssue,
-      description: ticketData.description,
-      createdAt: now.toISOString().replace("T", " ").substring(0, 16),
-      supervisorNote: "Ticket logged into hostel assistance portal. Supervisor will review shortly.",
-      timeline: [
-        { step: "Request Submitted", time: formattedDate, done: true },
-        { step: "Supervisor Review", time: "Pending", done: false },
-        { step: "Staff Assignment", time: "Pending", done: false },
-        { step: "Resolution", time: "Pending", done: false }
-      ]
-    };
+      const res = await fetch("/api/tickets", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(payload)
+      });
+      const data = await res.json();
 
-    setTickets([newTicket, ...tickets]);
-    setIsNewRequestOpen(false);
-    showToast(`Request #${newId} submitted successfully!`);
+      if (data.success && data.ticket) {
+        setTickets((prev) => [data.ticket, ...prev]);
+        setIsNewRequestOpen(false);
+        showToast(`Request #${data.ticket.id} submitted successfully!`);
+      } else {
+        showToast("Error saving ticket: " + (data.message || "Unknown error"));
+      }
+    } catch (err) {
+      // Local fallback
+      const newId = "HST-" + (205 + tickets.length);
+      const newTicket = {
+        id: newId,
+        ...ticketData,
+        status: "pending",
+        studentName: currentUser.name,
+        studentEmail: currentUser.email,
+        roomNo: ticketData.roomNo || currentUser.roomNo,
+        block: currentUser.block,
+        supervisorNote: "Ticket logged.",
+        timeline: [{ step: "Request Submitted", time: "Just now", done: true }]
+      };
+      setTickets([newTicket, ...tickets]);
+      setIsNewRequestOpen(false);
+      showToast(`Request #${newId} submitted successfully!`);
+    }
   };
 
-  const handleUpdateTicketStatus = (ticketId, newStatus, note = "") => {
-    setTickets((prev) =>
-      prev.map((t) => {
-        if (t.id === ticketId) {
-          const updatedTimeline = t.timeline.map((step, idx) => {
-            if (newStatus === "progress" && idx <= 2) return { ...step, done: true };
-            if (newStatus === "resolved") return { ...step, done: true };
-            return step;
-          });
+  const handleUpdateTicketStatus = async (ticketId, newStatus, note = "") => {
+    try {
+      const res = await fetch(`/api/tickets/${ticketId}`, {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ status: newStatus, supervisorNote: note })
+      });
+      const data = await res.json();
 
-          return {
-            ...t,
-            status: newStatus,
-            supervisorNote: note || (newStatus === "resolved" ? "Issue inspected and verified fixed by warden." : t.supervisorNote),
-            timeline: updatedTimeline
-          };
+      if (data.success && data.ticket) {
+        setTickets((prev) =>
+          prev.map((t) => (t.id === ticketId ? data.ticket : t))
+        );
+        if (selectedTicket && selectedTicket.id === ticketId) {
+          setSelectedTicket(data.ticket);
         }
-        return t;
-      })
-    );
-
-    if (selectedTicket && selectedTicket.id === ticketId) {
-      setSelectedTicket((prev) => ({
-        ...prev,
-        status: newStatus,
-        supervisorNote: note || (newStatus === "resolved" ? "Issue inspected and verified fixed by warden." : prev.supervisorNote)
-      }));
+        showToast(`Ticket #${ticketId} status updated to ${newStatus === "progress" ? "In Progress" : newStatus.toUpperCase()}`);
+      } else {
+        showToast("Update error: " + (data.message || "Failed"));
+      }
+    } catch (err) {
+      // Local state fallback
+      setTickets((prev) =>
+        prev.map((t) => (t.id === ticketId ? { ...t, status: newStatus, supervisorNote: note || t.supervisorNote } : t))
+      );
+      showToast(`Ticket #${ticketId} status updated!`);
     }
-
-    showToast(`Ticket #${ticketId} status updated to ${newStatus.toUpperCase()}`);
   };
 
   // Filtered Tickets
@@ -464,6 +521,7 @@ function App() {
       <Navbar
         currentUser={currentUser}
         activeRoleView={activeRoleView}
+        dbStatus={dbStatus}
         onRoleChange={(role) => setActiveRoleView(role)}
         onLogout={handleLogout}
         onOpenGuide={() => setIsGuideOpen(true)}
@@ -541,7 +599,7 @@ function App() {
 // ----------------------------------------------------------
 // NAVBAR COMPONENT
 // ----------------------------------------------------------
-function Navbar({ currentUser, activeRoleView, onRoleChange, onLogout, onOpenGuide }) {
+function Navbar({ currentUser, activeRoleView, dbStatus, onRoleChange, onLogout, onOpenGuide }) {
   return (
     <header className="navbar">
       <div className="nav-container">
@@ -549,6 +607,15 @@ function Navbar({ currentUser, activeRoleView, onRoleChange, onLogout, onOpenGui
           <div className="brand-icon">🏨</div>
           <span>HostelCare</span>
           <span className="brand-badge">Student Portal</span>
+          {dbStatus && (
+            <div
+              className={`status-indicator-pill ${dbStatus.database === "connected" ? "online" : "offline"}`}
+              title={dbStatus.database === "connected" ? "Database connected and operational" : "Service Offline"}
+            >
+              <span className="status-dot-pulse"></span>
+              <span>{dbStatus.database === "connected" ? "Active" : "Offline"}</span>
+            </div>
+          )}
         </div>
 
         <div className="nav-actions">
@@ -605,8 +672,9 @@ function LoginPage({ onLogin, onSwitchToSignup }) {
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
   const [error, setError] = useState("");
+  const [loading, setLoading] = useState(false);
 
-  const handleSubmit = (e) => {
+  const handleSubmit = async (e) => {
     e.preventDefault();
     setError("");
 
@@ -615,7 +683,9 @@ function LoginPage({ onLogin, onSwitchToSignup }) {
       return;
     }
 
-    const res = onLogin(email, password);
+    setLoading(true);
+    const res = await onLogin(email, password);
+    setLoading(false);
     if (!res.success) {
       setError(res.error);
     }
@@ -690,8 +760,8 @@ function LoginPage({ onLogin, onSwitchToSignup }) {
             />
           </div>
 
-          <button type="submit" className="btn btn-primary" style={{ width: "100%", marginTop: "0.5rem" }}>
-            Sign In to Hostel Portal
+          <button type="submit" className="btn btn-primary" style={{ width: "100%", marginTop: "0.5rem" }} disabled={loading}>
+            {loading ? "Signing In..." : "Sign In to Hostel Portal"}
           </button>
         </form>
 
@@ -721,12 +791,13 @@ function SignupPage({ onSignup, onSwitchToLogin }) {
     confirmPassword: ""
   });
   const [error, setError] = useState("");
+  const [loading, setLoading] = useState(false);
 
   const handleChange = (e) => {
     setFormData({ ...formData, [e.target.name]: e.target.value });
   };
 
-  const handleSubmit = (e) => {
+  const handleSubmit = async (e) => {
     e.preventDefault();
     setError("");
 
@@ -745,7 +816,9 @@ function SignupPage({ onSignup, onSwitchToLogin }) {
       return;
     }
 
-    const res = onSignup(formData);
+    setLoading(true);
+    const res = await onSignup(formData);
+    setLoading(false);
     if (!res.success) {
       setError(res.error);
     }
@@ -869,8 +942,8 @@ function SignupPage({ onSignup, onSwitchToLogin }) {
             </div>
           </div>
 
-          <button type="submit" className="btn btn-primary" style={{ width: "100%", marginTop: "0.5rem" }}>
-            Create Student Account
+          <button type="submit" className="btn btn-primary" style={{ width: "100%", marginTop: "0.5rem" }} disabled={loading}>
+            {loading ? "Creating Account..." : "Create Student Account"}
           </button>
         </form>
 
@@ -1134,6 +1207,7 @@ function NewRequestModal({ initialCategory, currentUser, onClose, onSubmit }) {
   const [title, setTitle] = useState("");
   const [description, setDescription] = useState("");
   const [error, setError] = useState("");
+  const [submitting, setSubmitting] = useState(false);
 
   // Update subIssue when category changes
   const handleCategoryChange = (newCat) => {
@@ -1144,16 +1218,17 @@ function NewRequestModal({ initialCategory, currentUser, onClose, onSubmit }) {
     }
   };
 
-  const handleSubmit = (e) => {
+  const handleSubmit = async (e) => {
     e.preventDefault();
     if (!description.trim()) {
       setError("Please provide a brief description of the issue.");
       return;
     }
 
+    setSubmitting(true);
     const finalTitle = title.trim() || `${subIssue} in Room ${roomNo || currentUser.roomNo}`;
 
-    onSubmit({
+    await onSubmit({
       title: finalTitle,
       category,
       subIssue,
@@ -1162,6 +1237,7 @@ function NewRequestModal({ initialCategory, currentUser, onClose, onSubmit }) {
       preferredTime,
       description
     });
+    setSubmitting(false);
   };
 
   return (
@@ -1274,11 +1350,11 @@ function NewRequestModal({ initialCategory, currentUser, onClose, onSubmit }) {
           </div>
 
           <div className="modal-footer">
-            <button type="button" className="btn btn-secondary" onClick={onClose}>
+            <button type="button" className="btn btn-secondary" onClick={onClose} disabled={submitting}>
               Cancel
             </button>
-            <button type="submit" className="btn btn-primary">
-              Submit Request
+            <button type="submit" className="btn btn-primary" disabled={submitting}>
+              {submitting ? "Submitting Request..." : "Submit Request"}
             </button>
           </div>
         </form>
@@ -1452,30 +1528,29 @@ function ClassroomGuideModal({ onClose }) {
           </div>
 
           <div className="guide-section">
-            <h3>2. Key React Framework Concepts Used</h3>
+            <h3>2. Key Architecture & Framework Concepts</h3>
             <ul>
-              <li><strong>Components:</strong> Modular, reusable pieces of UI (`Navbar`, `LoginPage`, `SignupPage`, `Dashboard`, `NewRequestModal`, `TicketDetailModal`).</li>
-              <li><strong>State Management (useState):</strong> Manages user authentication, tickets list, category filters, search queries, and modal visibility dynamically.</li>
-              <li><strong>Persistence (useEffect & localStorage):</strong> Automatically saves all registered students and tickets in the browser's LocalStorage so data never vanishes on refresh.</li>
-              <li><strong>Performance (useMemo):</strong> Efficiently computes filtered tickets and dashboard metrics without unnecessary re-renders.</li>
-              <li><strong>Props & One-Way Data Flow:</strong> Data and actions are passed cleanly from the parent `App` down to child components.</li>
+              <li><strong>Node.js & Express REST Backend:</strong> Provides backend API endpoints (`/api/auth` and `/api/tickets`) for student registration, login verification, and complaint ticket lifecycle management.</li>
+              <li><strong>MongoDB & Mongoose:</strong> Provides robust NoSQL document storage for users and tickets with schemas, validation, and persistent history.</li>
+              <li><strong>React 18 Component UI:</strong> Modular components (`Navbar`, `LoginPage`, `SignupPage`, `Dashboard`, `NewRequestModal`, `TicketDetailModal`).</li>
+              <li><strong>State & Hooks (useState, useEffect, useMemo):</strong> Handles reactive state, asynchronous API fetching, dynamic status tracking, and computed analytics.</li>
+              <li><strong>Dual-Role Architecture:</strong> Clear separation between Student view (submitting requests & tracking room tickets) and Warden administration (managing all hostel tickets & adding supervisor notes).</li>
             </ul>
           </div>
 
           <div className="guide-section">
             <h3>3. Architecture Flow Diagram</h3>
             <div className="guide-code-box">
-              App (State Root: currentUser, tickets, users, filters)<br/>
-              &nbsp;├── Navbar (Brand, Role Switcher, Presentation Guide, Logout)<br/>
-              &nbsp;├── LoginPage & SignupPage (Conditional Render if !currentUser)<br/>
-              &nbsp;└── Dashboard (Rendered when authenticated)<br/>
-              &nbsp;&nbsp;&nbsp;&nbsp;&nbsp;├── WelcomeBanner (Room & Block info)<br/>
-              &nbsp;&nbsp;&nbsp;&nbsp;&nbsp;├── StatsCards (Total, Pending, In-Progress, Resolved)<br/>
-              &nbsp;&nbsp;&nbsp;&nbsp;&nbsp;├── FacilityCards (Room, Food, Water, AC, Electrical, Wi-Fi)<br/>
-              &nbsp;&nbsp;&nbsp;&nbsp;&nbsp;├── FilterToolbar & SearchBar<br/>
-              &nbsp;&nbsp;&nbsp;&nbsp;&nbsp;├── TicketsList (TicketCard items with status pills)<br/>
-              &nbsp;&nbsp;&nbsp;&nbsp;&nbsp;├── NewRequestModal (Dynamic category-specific sub-issues)<br/>
-              &nbsp;&nbsp;&nbsp;&nbsp;&nbsp;└── TicketDetailModal (Timeline progression & Warden controls)
+              React 18 Frontend (Port 3000)<br/>
+              &nbsp;├── UI Layer (Navbar, Login/Signup, Dashboard, Ticket Modals)<br/>
+              &nbsp;└── REST API Client (fetch /api/auth, /api/tickets)<br/>
+              &nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;▲&nbsp;▼ (JSON HTTP Requests)<br/>
+              Node.js + Express Backend Server (`server.js`)<br/>
+              &nbsp;├── Auth Routes (`/api/auth/login`, `/api/auth/signup`)<br/>
+              &nbsp;├── Ticket Routes (`/api/tickets`, status patch, category filter)<br/>
+              &nbsp;└── Mongoose ODM Layer (UserSchema, TicketSchema)<br/>
+              &nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;▲&nbsp;▼ (Mongoose Connection)<br/>
+              MongoDB Database (`hostelcare` database, users & tickets collections)
             </div>
           </div>
 
@@ -1483,13 +1558,13 @@ function ClassroomGuideModal({ onClose }) {
             <h3>4. Top 4 Expected Viva Questions & Answers</h3>
             
             <div className="qa-card">
-              <strong>Q1: Why did you choose React for this system?</strong>
-              React allows building dynamic Single Page Applications (SPAs) with component reusability and instantaneous UI updates using state hooks, eliminating full page reloads.
+              <strong>Q1: What is the tech stack of this application?</strong>
+              The project is a Full-Stack MERN-architecture application: <strong>React 18</strong> for the reactive single-page frontend, <strong>Node.js</strong> and <strong>Express</strong> for the RESTful backend web server, and <strong>MongoDB</strong> with <strong>Mongoose</strong> for document database storage.
             </div>
 
             <div className="qa-card">
-              <strong>Q2: Where is the database or backend stored?</strong>
-              To keep the architecture simple and eliminate complex server dependencies for this classroom demonstration, we utilize the browser's native `localStorage` API, serializing state with `JSON.stringify` and restoring it with `JSON.parse`.
+              <strong>Q2: How and where is data stored?</strong>
+              All user accounts and hostel complaint tickets are saved permanently in a <strong>MongoDB</strong> database. Mongoose models (`User` and `Ticket`) enforce data validation and timestamps. When a ticket is submitted or updated, React sends a REST request to the Node.js backend which writes directly to MongoDB.
             </div>
 
             <div className="qa-card">

@@ -2,11 +2,12 @@
   "name": "hostel-management-system",
   "version": "1.0.0",
   "description": "A modern, classroom-ready Hostel Assistance & Management System built with React and JavaScript",
-  "main": "index.html",
+  "main": "server.js",
   "scripts": {
-    "start": "python -m http.server 3000",
-    "serve": "python -m http.server 3000",
-    "build": "node build.js"
+    "start": "node server.js",
+    "dev": "node --watch server.js",
+    "build": "node build.js",
+    "serve": "node server.js"
   },
   "keywords": [
     "react",
@@ -19,6 +20,10 @@
   "author": "Student Project",
   "license": "MIT",
   "dependencies": {
+    "cors": "^2.8.6",
+    "dotenv": "^18.0.9",
+    "express": "^5.3.0",
+    "mongoose": "^9.11.4",
     "react": "^18.2.0",
     "react-dom": "^18.2.0"
   }
