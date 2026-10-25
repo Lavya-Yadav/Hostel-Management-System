@@ -14,10 +14,15 @@
   <!-- Core Design System CSS -->
   <link rel="stylesheet" href="style.css" />
 
-  <!-- Local Offline-Ready React 18, ReactDOM 18 & Babel Standalone (Works 100% offline in classrooms!) -->
-  <script src="lib/react.production.min.js"></script>
-  <script src="lib/react-dom.production.min.js"></script>
-  <script src="lib/babel.min.js"></script>
+  <!-- React 18, ReactDOM 18 & Babel (CDN with local fallback) -->
+  <script src="https://unpkg.com/react@18/umd/react.production.min.js" crossorigin></script>
+  <script src="https://unpkg.com/react-dom@18/umd/react-dom.production.min.js" crossorigin></script>
+  <script>
+    if (!window.React) {
+      document.write('<script src="lib/react.production.min.js"><\/script>');
+      document.write('<script src="lib/react-dom.production.min.js"><\/script>');
+    }
+  </script>
 </head>
 <body>
   <!-- Root Container for React App -->
@@ -35,6 +40,21 @@
       JavaScript is required to run the HostelCare Student Portal. Please enable JavaScript in your browser settings.
     </div>
   </noscript>
+
+  <!-- Error diagnostic helper -->
+  <script>
+    window.addEventListener('error', function(e) {
+      console.error('Captured Frontend Error:', e);
+      var rootEl = document.getElementById('root');
+      if (rootEl && rootEl.innerHTML.includes('Loading HostelCare Portal')) {
+        rootEl.innerHTML = '<div style="padding: 2rem; max-width: 600px; margin: 3rem auto; font-family: sans-serif; background: #fff1f2; border: 1px solid #fecdd3; border-radius: 8px; color: #9f1239;">' +
+          '<h3 style="margin-top:0;">⚠️ UI Loading Error</h3>' +
+          '<p>' + (e.message || 'Unknown error occurred while initializing React') + '</p>' +
+          '<button onclick="location.reload()" style="background:#e11d48; color:#fff; border:none; padding:8px 16px; border-radius:6px; cursor:pointer;">Reload Portal</button>' +
+          '</div>';
+      }
+    });
+  </script>
 
   <!-- React 18 Application Script (Precompiled for ultra-fast, zero-delay rendering) -->
   <script src="app.compiled.js"></script>
