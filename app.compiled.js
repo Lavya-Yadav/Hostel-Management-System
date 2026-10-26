@@ -615,11 +615,7 @@ function Navbar({
     className: "status-dot-pulse"
   }), /*#__PURE__*/React.createElement("span", null, dbStatus.database === "connected" ? "Active" : "Offline"))), /*#__PURE__*/React.createElement("div", {
     className: "nav-actions"
-  }, /*#__PURE__*/React.createElement("button", {
-    className: "btn btn-guide",
-    onClick: onOpenGuide,
-    title: "Open classroom presentation notes & Viva answers"
-  }, "\uD83C\uDF93 Presentation Guide"), currentUser && /*#__PURE__*/React.createElement(React.Fragment, null, /*#__PURE__*/React.createElement("div", {
+  }, currentUser && /*#__PURE__*/React.createElement(React.Fragment, null, /*#__PURE__*/React.createElement("div", {
     className: "user-badge"
   }, /*#__PURE__*/React.createElement("div", {
     className: "user-avatar"

@@ -608,11 +608,6 @@ function Navbar({ currentUser, activeRoleView, dbStatus, onLogout, onOpenGuide }
         </div>
 
         <div className="nav-actions">
-          {/* Classroom Explanation Guide Button */}
-          <button className="btn btn-guide" onClick={onOpenGuide} title="Open classroom presentation notes & Viva answers">
-            🎓 Presentation Guide
-          </button>
-
           {currentUser && (
             <>
               {/* User profile pill with automatic role tag */}
