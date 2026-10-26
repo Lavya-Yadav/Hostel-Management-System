@@ -268,16 +268,7 @@ function App() {
   const [activeCategoryFilter, setActiveCategoryFilter] = useState("all");
   const [activeStatusFilter, setActiveStatusFilter] = useState("all");
   const [searchQuery, setSearchQuery] = useState("");
-  const [activeRoleView, setActiveRoleView] = useState(() => {
-    const saved = localStorage.getItem("hostel_currentUser");
-    if (saved) {
-      try {
-        const u = JSON.parse(saved);
-        return u.role === "warden" ? "warden" : "student";
-      } catch (e) {}
-    }
-    return "student";
-  });
+  const activeRoleView = currentUser?.role === "warden" ? "warden" : "student";
   
   // Modals state
   const [isNewRequestOpen, setIsNewRequestOpen] = useState(false);
@@ -356,7 +347,6 @@ function App() {
 
       if (data.success) {
         setCurrentUser(data.user);
-        setActiveRoleView(data.user.role === "warden" ? "warden" : "student");
         showToast(data.message || `Welcome back, ${data.user.name}!`);
         return { success: true };
       } else {
@@ -369,7 +359,6 @@ function App() {
       );
       if (foundUser) {
         setCurrentUser(foundUser);
-        setActiveRoleView(foundUser.role === "warden" ? "warden" : "student");
         showToast(`Welcome back, ${foundUser.name}! (Demo Fallback)`);
         return { success: true };
       }
@@ -388,7 +377,6 @@ function App() {
 
       if (data.success) {
         setCurrentUser(data.user);
-        setActiveRoleView("student");
         showToast(data.message || "Account created successfully!");
         return { success: true };
       } else {
@@ -522,7 +510,6 @@ function App() {
         currentUser={currentUser}
         activeRoleView={activeRoleView}
         dbStatus={dbStatus}
-        onRoleChange={(role) => setActiveRoleView(role)}
         onLogout={handleLogout}
         onOpenGuide={() => setIsGuideOpen(true)}
       />
@@ -599,14 +586,16 @@ function App() {
 // ----------------------------------------------------------
 // NAVBAR COMPONENT
 // ----------------------------------------------------------
-function Navbar({ currentUser, activeRoleView, dbStatus, onRoleChange, onLogout, onOpenGuide }) {
+function Navbar({ currentUser, activeRoleView, dbStatus, onLogout, onOpenGuide }) {
+  const isWarden = activeRoleView === "warden";
+
   return (
     <header className="navbar">
       <div className="nav-container">
         <div className="brand">
           <div className="brand-icon">🏨</div>
           <span>HostelCare</span>
-          <span className="brand-badge">Student Portal</span>
+          <span className="brand-badge">{isWarden ? "Warden Admin" : "Student Portal"}</span>
           {dbStatus && (
             <div
               className={`status-indicator-pill ${dbStatus.database === "connected" ? "online" : "offline"}`}
@@ -626,30 +615,17 @@ function Navbar({ currentUser, activeRoleView, dbStatus, onRoleChange, onLogout,
 
           {currentUser && (
             <>
-              {/* Role Switcher (Student / Warden view) */}
-              <div className="role-switcher" title="Toggle perspective for classroom demo">
-                <button
-                  className={`role-btn ${activeRoleView === "student" ? "active" : ""}`}
-                  onClick={() => onRoleChange("student")}
-                >
-                  👤 Student
-                </button>
-                <button
-                  className={`role-btn ${activeRoleView === "warden" ? "active" : ""}`}
-                  onClick={() => onRoleChange("warden")}
-                >
-                  🛡️ Warden View
-                </button>
-              </div>
-
-              {/* User profile pill */}
+              {/* User profile pill with automatic role tag */}
               <div className="user-badge">
                 <div className="user-avatar">
                   {currentUser.name ? currentUser.name.charAt(0) : "U"}
                 </div>
                 <span>{currentUser.name}</span>
                 <span style={{ fontSize: "0.75rem", color: "var(--text-muted)" }}>
-                  ({currentUser.roomNo})
+                  ({isWarden ? "Admin" : currentUser.roomNo})
+                </span>
+                <span className={`badge ${isWarden ? "badge-progress" : "badge-resolved"}`} style={{ fontSize: "0.7rem", padding: "0.15rem 0.45rem", marginLeft: "0.3rem" }}>
+                  {isWarden ? "Warden" : "Student"}
                 </span>
               </div>
 

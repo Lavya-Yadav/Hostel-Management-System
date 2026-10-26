@@ -284,16 +284,7 @@ function App() {
   const [activeCategoryFilter, setActiveCategoryFilter] = useState("all");
   const [activeStatusFilter, setActiveStatusFilter] = useState("all");
   const [searchQuery, setSearchQuery] = useState("");
-  const [activeRoleView, setActiveRoleView] = useState(() => {
-    const saved = localStorage.getItem("hostel_currentUser");
-    if (saved) {
-      try {
-        const u = JSON.parse(saved);
-        return u.role === "warden" ? "warden" : "student";
-      } catch (e) {}
-    }
-    return "student";
-  });
+  const activeRoleView = currentUser?.role === "warden" ? "warden" : "student";
 
   // Modals state
   const [isNewRequestOpen, setIsNewRequestOpen] = useState(false);
@@ -378,7 +369,6 @@ function App() {
       const data = await res.json();
       if (data.success) {
         setCurrentUser(data.user);
-        setActiveRoleView(data.user.role === "warden" ? "warden" : "student");
         showToast(data.message || `Welcome back, ${data.user.name}!`);
         return {
           success: true
@@ -394,7 +384,6 @@ function App() {
       const foundUser = INITIAL_USERS.find(u => u.email.toLowerCase() === email.toLowerCase() && u.password === password);
       if (foundUser) {
         setCurrentUser(foundUser);
-        setActiveRoleView(foundUser.role === "warden" ? "warden" : "student");
         showToast(`Welcome back, ${foundUser.name}! (Demo Fallback)`);
         return {
           success: true
@@ -418,7 +407,6 @@ function App() {
       const data = await res.json();
       if (data.success) {
         setCurrentUser(data.user);
-        setActiveRoleView("student");
         showToast(data.message || "Account created successfully!");
         return {
           success: true
@@ -556,7 +544,6 @@ function App() {
     currentUser: currentUser,
     activeRoleView: activeRoleView,
     dbStatus: dbStatus,
-    onRoleChange: role => setActiveRoleView(role),
     onLogout: handleLogout,
     onOpenGuide: () => setIsGuideOpen(true)
   }), !currentUser ? authView === "login" ? /*#__PURE__*/React.createElement(LoginPage, {
@@ -607,10 +594,10 @@ function Navbar({
   currentUser,
   activeRoleView,
   dbStatus,
-  onRoleChange,
   onLogout,
   onOpenGuide
 }) {
+  const isWarden = activeRoleView === "warden";
   return /*#__PURE__*/React.createElement("header", {
     className: "navbar"
   }, /*#__PURE__*/React.createElement("div", {
@@ -621,7 +608,7 @@ function Navbar({
     className: "brand-icon"
   }, "\uD83C\uDFE8"), /*#__PURE__*/React.createElement("span", null, "HostelCare"), /*#__PURE__*/React.createElement("span", {
     className: "brand-badge"
-  }, "Student Portal"), dbStatus && /*#__PURE__*/React.createElement("div", {
+  }, isWarden ? "Warden Admin" : "Student Portal"), dbStatus && /*#__PURE__*/React.createElement("div", {
     className: `status-indicator-pill ${dbStatus.database === "connected" ? "online" : "offline"}`,
     title: dbStatus.database === "connected" ? "Database connected and operational" : "Service Offline"
   }, /*#__PURE__*/React.createElement("span", {
@@ -633,15 +620,6 @@ function Navbar({
     onClick: onOpenGuide,
     title: "Open classroom presentation notes & Viva answers"
   }, "\uD83C\uDF93 Presentation Guide"), currentUser && /*#__PURE__*/React.createElement(React.Fragment, null, /*#__PURE__*/React.createElement("div", {
-    className: "role-switcher",
-    title: "Toggle perspective for classroom demo"
-  }, /*#__PURE__*/React.createElement("button", {
-    className: `role-btn ${activeRoleView === "student" ? "active" : ""}`,
-    onClick: () => onRoleChange("student")
-  }, "\uD83D\uDC64 Student"), /*#__PURE__*/React.createElement("button", {
-    className: `role-btn ${activeRoleView === "warden" ? "active" : ""}`,
-    onClick: () => onRoleChange("warden")
-  }, "\uD83D\uDEE1\uFE0F Warden View")), /*#__PURE__*/React.createElement("div", {
     className: "user-badge"
   }, /*#__PURE__*/React.createElement("div", {
     className: "user-avatar"
@@ -650,7 +628,14 @@ function Navbar({
       fontSize: "0.75rem",
       color: "var(--text-muted)"
     }
-  }, "(", currentUser.roomNo, ")")), /*#__PURE__*/React.createElement("button", {
+  }, "(", isWarden ? "Admin" : currentUser.roomNo, ")"), /*#__PURE__*/React.createElement("span", {
+    className: `badge ${isWarden ? "badge-progress" : "badge-resolved"}`,
+    style: {
+      fontSize: "0.7rem",
+      padding: "0.15rem 0.45rem",
+      marginLeft: "0.3rem"
+    }
+  }, isWarden ? "Warden" : "Student")), /*#__PURE__*/React.createElement("button", {
     className: "btn btn-outline btn-sm",
     onClick: onLogout
   }, "Logout")))));
